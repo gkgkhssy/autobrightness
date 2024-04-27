@@ -82,6 +82,7 @@ def background_task(q):
             foo = public.setMonitor(bri, bri_old, bri_recom - bri_now)
         except Exception as e:
             print(f"发生错误: {e}")
+        # 环境亮度估算中
         if foo >= 0:
             bri_recom = foo
             print("Adjusting...")
@@ -90,13 +91,15 @@ def background_task(q):
                 bri_now = bri_recom
                 public.BrightnessAdjust(bri_now)
                 continue
-            # 缓冲亮度
-            try:
-                now_bri_foo = public.transitionBrightness(bri_now, bri_recom)
-                if now_bri_foo != -2:
-                    bri_now = now_bri_foo
-            except Exception as e:
-                print(f"发生错误: {e}")
+            # 设置缓冲亮度
+            if public.TRANSITIONAL["SWITCH"] == 1:
+                try:
+                    now_bri_foo = public.transitionBrightness(bri_now, bri_recom)
+                    if now_bri_foo != -2:
+                        bri_now = now_bri_foo
+                except Exception as e:
+                    print(f"发生错误: {e}")
+
             bri_stable = 0
         # 亮度值稳定后
         elif foo == -2:
@@ -162,7 +165,7 @@ class App(Tk):
         self.title("自动亮度")
         self.geometry("500x300")
         self.iconbitmap(public.processPath("1.ico"))
-        self.text = Text(self, width=200, height=80)  # 添加一个Text用于显示文本
+        self.text = Text(self, width=250, height=80)  # 添加一个Text用于显示文本
         self.text.pack(pady=20)  # 垂直填充一些空间
         # 禁用键盘输入，只允许 Ctrl+c 复制
         self.text.bind(
@@ -237,8 +240,6 @@ class App(Tk):
         self.protocol("WM_DELETE_WINDOW", on_exit)
 
         Thread(target=icon.run, daemon=True).start()
-
-    # 设置窗体
 
     # 周期执行队列
     def check_queue(self):

@@ -4,6 +4,7 @@ from configparser import ConfigParser
 
 SETTING = {}
 BRIGHTNESS = {}
+TRANSITIONAL = {}
 SPLIT = "-----------------------------"
 
 
@@ -75,8 +76,10 @@ def apply_config(config):
     BRIGHTNESS["LOW_CORRECT"] = config["brightness"].getfloat("low_correct")
     BRIGHTNESS["HIGH_BRIGHTNESS"] = config["brightness"].getint("high_brightness")
     BRIGHTNESS["HIGH_CORRECT"] = config["brightness"].getfloat("high_correct")
-    BRIGHTNESS["TRANSITIONAL"] = config["brightness"].getfloat("transitional")
     BRIGHTNESS["CORRECT"] = config["brightness"].getfloat("correct")
+
+    TRANSITIONAL["SWITCH"] = config["transitional"].getint("switch")
+    TRANSITIONAL["WEIGHTS"] = config["transitional"].getfloat("weights")
     return True
 
 
@@ -95,34 +98,68 @@ def create_config_file(filename):
     # 写入配置文件
     with open(filename, "w", encoding="utf-8") as configfile:
         configfile.write(
-            """# 配置文件，删除该文件后重新生成默认配置，注意亮度值取整
+            """# 配置文件，删除该文件后重新生成默认配置，注意亮度值需取整
+;---------------------------------------------------------------------------------------
 [setting]
-# 选择摄像头，默认 0
+# 如果连接了多个摄像头或虚拟摄像头，修改此项切换调用的摄像头。默认 0
+# 如果需要使用摄像头，需要暂时将程序退出解除摄像头占用，或切换成其他不常用的摄像头。
+# 取 -1 时自动检测可用摄像头
 camera = 0
-# 判断周期，间隔多少秒执行一次判断
-interval = 0.3
-# 启动时自动打开控制台
-show = 1
 
+# 每隔多少秒执行一次判断，过快影响性能和判断拟合，过慢响应延迟较高。
+interval = 0.3
+
+# 每次启动程序是否自动打开控制台。
+# 开启 1，关闭 0
+show = 1
+;---------------------------------------------------------------------------------------
 [brightness]
-# 定义亮度的最大和最小值
+# 定义自动调节的亮度最小和最大值。
+# 如果不需要更低的亮度可以适当提高 min，不需要更高的亮度则适当降低 max
 min = 0
 max = 100
+
+# 计算权值（推荐1.5-4，该系数越小，环境亮度越高则屏幕更亮）
+# 优先修改这个值，亮度不够则调低，过亮则调高
+# 该值几乎不会影响最低亮度
+weights = 2.5
+
 # 亮度的静态和动态防抖值
+# 如果希望程序对环境亮度变化更敏感，可以适当减少 step
+# 如果屏幕亮度一直处于变化，无法稳定，适当增加 step
+# 如果控制台一直在调整亮度(Adjusting...)，适当增加 change_step
+# 如果对每次调整的亮度浮动过大不满意，适当减少 change_step
 step = 10
 change_step = 2
-# 计算权值（取值1.5-2.5，该系数越小，环境亮度越高则屏幕更亮）
-weights = 2.1
+
 # 低亮度阈值与修正值
+# 如果需要在某个亮度值以下更亮或更暗，先确保 low_correct 为 0
+# 观察控制台稳定后亮度值，一般将该值+5确保范围生效，然后填入 low_brightness
+# 如果低于这个范围，需要更低亮度可以填 -10，更亮则填 10，可以适当取值
 low_brightness = 55
 low_correct = 0
+
 # 高亮度阈值与修正值
+# 如果需要在某个亮度值以上更亮或更暗，先确保 high_correct 为 0
+# 观察控制台稳定后亮度值，一般将该值-5确保范围生效，然后填入 high_brightness
+# 如果高于这个范围，需要更低亮度可以填 -10，更亮则填 10，可以适当取值
 high_brightness = 75
 high_correct = 0
-# 亮度剧烈变化时,初步取值权值（取值1.5-4，该系数越小，估值越激进）
-transitional = 2
+
 # 亮度总偏移值
+# 如果需要最终亮度整体增加或减少一个固定值，修改此项
+# 该值修改优先级最低
 correct = 0
+;---------------------------------------------------------------------------------------
+[transitional]
+# 亮度剧烈变化时，启动亮度过渡估算，加快响应速度
+# 开启 1，关闭 0
+switch = 1
+
+# 计算权值（推荐1.5-3，该系数越小，估值越激进）
+# 如果希望环境亮度变化剧烈时，屏幕亮度变化跨幅更大，可以填 1.5
+# 如果希望环境亮度变化剧烈时，屏幕亮度变化跨幅更小，可以填 3
+weights = 2
 """
         )
 
@@ -180,7 +217,7 @@ def setMonitor(envLx, old_envLx, change):
 def transitionBrightness(now, recom):
     if abs(now - recom) < BRIGHTNESS["STEP"] * 2:
         return -2
-    change = (recom - now) / BRIGHTNESS["TRANSITIONAL"]
+    change = (recom - now) / TRANSITIONAL["WEIGHTS"]
     # 过矫修正
     if change > BRIGHTNESS["STEP"] * 2:
         change -= BRIGHTNESS["STEP"] * 2
