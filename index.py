@@ -5,11 +5,13 @@ from queue import Empty, Queue
 from tkinter import Text, Tk, ttk
 from pystray import MenuItem, Menu
 from PIL import Image
+from tkinter import Scale
 
 import public
 
 settings_open = False  # 判断设置页面是否已打开
 settings_updata = False  # 判断设置是否更新
+settings_easy_updata = False  # 判断亮度设置是否更新
 
 
 # 挂载任务
@@ -48,6 +50,14 @@ def background_task(q):
             cap.release()
             cv2.destroyAllWindows()
             return
+        global settings_easy_updata
+        if settings_easy_updata:
+            # 初始化参数，应用更新配置
+            bri_now = -1
+            bri_old = -1
+            bri_recom = -100
+            bri_stable = 0
+            settings_easy_updata = False
 
         ret, frame = cap.read()
         if not ret:
@@ -81,7 +91,7 @@ def background_task(q):
         try:
             foo = public.setMonitor(bri, bri_old, bri_recom - bri_now)
         except Exception as e:
-            print(f"发生错误: {e}")
+            print(f"Error: {e}")
         # 环境亮度估算中
         if foo >= 0:
             bri_recom = foo
@@ -98,7 +108,7 @@ def background_task(q):
                     if now_bri_foo != -2:
                         bri_now = now_bri_foo
                 except Exception as e:
-                    print(f"发生错误: {e}")
+                    print(f"Error: {e}")
 
             bri_stable = 0
         # 亮度值稳定后
@@ -110,7 +120,7 @@ def background_task(q):
                     try:
                         public.BrightnessAdjust(bri_recom)
                     except Exception as e:
-                        print(f"发生错误: {e}")
+                        print(f"Error: {e}")
                     bri_now = bri_recom
                     print("Stable now: %s" % bri_now)
                     print(public.SPLIT)
@@ -136,17 +146,85 @@ def background_task(q):
 
 
 # 重新启动任务
-def rerun(self):
+def rerun_settings(self):
     public.open_ini("config.ini")
     # 重启线程
     global settings_updata
     settings_updata = True
+
     self.thread.join()  # 等待进程结束
     self.text.delete(1.0, "end")  # 清空输入框
     print("Restarting...")
     self.thread = Thread(target=background_task, args=(self.queue,), daemon=True)
     self.thread.start()
+
     settings_updata = False
+    global settings_open
+    settings_open = False
+
+
+def run_settings_easy(self):
+    root = Tk()
+    root.title("设置")
+    root.geometry("+500+300")
+    root.iconbitmap(public.processPath("1.ico"))
+    # 创建滑块控件
+    brightness_weights = Scale(
+        root,
+        label="低亮度不变，高亮度：更亮或更暗",
+        length=200,
+        width=20,
+        from_=1.5,
+        to=4,
+        orient="horizontal",
+        # tickinterval=1,
+        resolution=0.1,
+    )
+    brightness_weights.set(public.BRIGHTNESS["WEIGHTS"])
+    brightness_weights.pack()
+
+    brightness_correct = Scale(
+        root,
+        label="整体亮度：更暗或更亮",
+        length=200,
+        width=20,
+        from_=-50,
+        to=50,
+        orient="horizontal",
+        resolution=1,
+    )
+    brightness_correct.set(public.BRIGHTNESS["CORRECT"])
+    brightness_correct.pack()
+
+    # 实时应用参数
+    def weights_set(val):
+        public.BRIGHTNESS["WEIGHTS"] = float(val)
+        global settings_easy_updata
+        settings_easy_updata = True
+
+    def correct_set(val):
+        public.BRIGHTNESS["CORRECT"] = int(val)
+        global settings_easy_updata
+        settings_easy_updata = True
+
+    brightness_weights.bind(
+        "<ButtonRelease-1>", lambda e: weights_set(brightness_weights.get())
+    )
+
+    brightness_correct.bind(
+        "<ButtonRelease-1>", lambda e: correct_set(brightness_correct.get())
+    )
+
+    root.mainloop()
+
+    # 关闭窗口后保存参数
+    try:
+        public.apply_settings_easy("config.ini")
+        print("The settings are saved")
+    except Exception as e:
+        print(f"Error: {e}")
+    print(public.SPLIT)
+
     global settings_open
     settings_open = False
 
@@ -198,38 +276,33 @@ class App(Tk):
         def on_exit():
             self.withdraw()
 
-        def settings_tool():
-            root = Tk()
-            root.title("滑块控件示例")
-            root.withdraw()  # 隐藏主窗口
-            root.geometry("500x300")
-            root.iconbitmap(public.processPath("1.ico"))
-            # 创建滑块控件
-            slider = ttk.Scale(
-                root,
-                from_=0,
-                to=100,
-                orient="horizontal",
-                command=lambda value: print(value),
-            )
-            slider.pack()
+        # 简单设置
+        def settings_easy():
+            global settings_open
+            if settings_open:
+                self.deiconify()
+                print("The settings page has opened!")
+                return
+            self.settings_easy = Thread(target=run_settings_easy, args=(self,), daemon=True)
+            self.settings_easy.start()
+            settings_open = True
 
-            # 运行窗体
-            root.mainloop()
-
+        # 完整设置
         def settings():
             global settings_open
             if settings_open:
                 self.deiconify()
                 print("The settings page has opened!")
                 return
-            self.task_foo = Thread(target=rerun, args=(self,), daemon=True)
-            self.task_foo.start()
+            self.settings = Thread(target=rerun_settings, args=(self,), daemon=True)
+            self.settings.start()
             settings_open = True
 
+        # 菜单选项
         menu = (
             MenuItem("显示", show_window, default=True),
-            MenuItem("设置", settings),
+            MenuItem("设置", settings_easy),
+            MenuItem("更多", settings),
             Menu.SEPARATOR,
             MenuItem("退出", quit_window),
         )

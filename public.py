@@ -1,4 +1,4 @@
-import wmi, math, sys, os, subprocess
+import wmi, math, sys, os, subprocess, tempfile, shutil
 
 from configparser import ConfigParser
 
@@ -34,6 +34,43 @@ def redirect_stdout_to_tkinter(text_widget):
             self.text_widget.see("end")
 
     sys.stdout = StdoutRedirector(text_widget)
+
+
+# 保留注释，修改单行键值，
+def update_ini_file(ini_file, section, option, new_value):
+    # 创建一个临时文件用于存储修改后的内容
+    with tempfile.NamedTemporaryFile(mode="w", delete=False) as tmpfile:
+        # 读取INI文件并处理注释
+        with open(ini_file, "r",encoding='utf-8') as file:
+            in_section = False
+            for line in file:
+                # 检查是否是新节的开始
+                if line.strip().startswith("["):
+                    section_name = line.strip()[1:-1]
+                    in_section = section_name == section
+                    tmpfile.write(line)
+                    continue
+
+                # 如果当前行在目标节中，并且是要修改的选项，则修改它
+                if in_section and "=" in line:
+                    key, value = line.split("=", 1)
+                    if key.strip() == option:
+                        tmpfile.write(f"{key.strip()} = {new_value}\n")
+                        continue
+
+                # 否则，将当前行（注释或空白行）写入临时文件
+                tmpfile.write(line)
+
+        # 将修改后的内容写回原始文件（或新文件，如果需要保留原始文件）
+        tmp_path = tmpfile.name
+
+    # 使用shutil确保文件被正确关闭和替换
+    with open(ini_file, "w",encoding='utf-8') as file:
+        with open(tmp_path, "r") as tmpfile:
+            shutil.copyfileobj(tmpfile, file)
+
+    # 删除临时文件
+    os.remove(tmp_path)
 
 
 # 读取配置文件
@@ -76,11 +113,24 @@ def apply_config(config):
     BRIGHTNESS["LOW_CORRECT"] = config["brightness"].getfloat("low_correct")
     BRIGHTNESS["HIGH_BRIGHTNESS"] = config["brightness"].getint("high_brightness")
     BRIGHTNESS["HIGH_CORRECT"] = config["brightness"].getfloat("high_correct")
-    BRIGHTNESS["CORRECT"] = config["brightness"].getfloat("correct")
+    BRIGHTNESS["CORRECT"] = config["brightness"].getint("correct")
 
     TRANSITIONAL["SWITCH"] = config["transitional"].getint("switch")
     TRANSITIONAL["WEIGHTS"] = config["transitional"].getfloat("weights")
     return True
+
+
+# 修改部分配置文件参数
+def apply_settings_easy(file_path):
+    # config = ConfigParser()
+    # config.read(file_path, encoding="utf-8")
+    # config.set("brightness", "weights", str(BRIGHTNESS["WEIGHTS"]))
+    # config.set("brightness", "correct", str(BRIGHTNESS["CORRECT"]))
+    # with open(file_path, "w") as f:
+    #     config.write(f)
+
+    update_ini_file(file_path, "brightness", "weights", str(BRIGHTNESS["WEIGHTS"]))
+    update_ini_file(file_path, "brightness", "correct", str(BRIGHTNESS["CORRECT"]))
 
 
 # 初始化配置文件
@@ -103,6 +153,7 @@ def create_config_file(filename):
 [setting]
 # 如果连接了多个摄像头或虚拟摄像头，修改此项切换调用的摄像头。默认 0
 # 如果需要使用摄像头，需要暂时将程序退出解除摄像头占用，或切换成其他不常用的摄像头。
+# 如果亮度一直没有发生变化且很低，可能选择了虚拟摄像头，改个序号值比如 1 或 2 试试
 # 取 -1 时自动检测可用摄像头
 camera = 0
 
@@ -111,7 +162,7 @@ interval = 0.3
 
 # 每次启动程序是否自动打开控制台。
 # 开启 1，关闭 0
-show = 1
+show = 0
 ;---------------------------------------------------------------------------------------
 [brightness]
 # 定义自动调节的亮度最小和最大值。
@@ -119,10 +170,16 @@ show = 1
 min = 0
 max = 100
 
+# 修改优先级第一
 # 计算权值（推荐1.5-4，该系数越小，环境亮度越高则屏幕更亮）
-# 优先修改这个值，亮度不够则调低，过亮则调高
+# 亮度不够则调低，过亮则调高
 # 该值几乎不会影响最低亮度
 weights = 2.5
+
+# 修改优先级第二
+# 亮度总偏移值
+# 如果需要最终亮度整体增加或减少一个固定值，修改此项
+correct = 0
 
 # 亮度的静态和动态防抖值
 # 如果希望程序对环境亮度变化更敏感，可以适当减少 step
@@ -145,11 +202,6 @@ low_correct = 0
 # 如果高于这个范围，需要更低亮度可以填 -10，更亮则填 10，可以适当取值
 high_brightness = 75
 high_correct = 0
-
-# 亮度总偏移值
-# 如果需要最终亮度整体增加或减少一个固定值，修改此项
-# 该值修改优先级最低
-correct = 0
 ;---------------------------------------------------------------------------------------
 [transitional]
 # 亮度剧烈变化时，启动亮度过渡估算，加快响应速度
