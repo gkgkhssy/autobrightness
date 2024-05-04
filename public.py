@@ -41,7 +41,7 @@ def update_ini_file(ini_file, section, option, new_value):
     # 创建一个临时文件用于存储修改后的内容
     with tempfile.NamedTemporaryFile(mode="w", delete=False) as tmpfile:
         # 读取INI文件并处理注释
-        with open(ini_file, "r",encoding='utf-8') as file:
+        with open(ini_file, "r", encoding="utf-8") as file:
             in_section = False
             for line in file:
                 # 检查是否是新节的开始
@@ -65,7 +65,7 @@ def update_ini_file(ini_file, section, option, new_value):
         tmp_path = tmpfile.name
 
     # 使用shutil确保文件被正确关闭和替换
-    with open(ini_file, "w",encoding='utf-8') as file:
+    with open(ini_file, "w", encoding="utf-8") as file:
         with open(tmp_path, "r") as tmpfile:
             shutil.copyfileobj(tmpfile, file)
 
@@ -109,6 +109,7 @@ def apply_config(config):
     BRIGHTNESS["STEP"] = config["brightness"].getfloat("step")
     BRIGHTNESS["CHANGE_STEP"] = config["brightness"].getfloat("change_step")
     BRIGHTNESS["WEIGHTS"] = config["brightness"].getfloat("weights")
+    BRIGHTNESS["DISCRETE"] = config["brightness"].getfloat("discrete")
     BRIGHTNESS["LOW_BRIGHTNESS"] = config["brightness"].getint("low_brightness")
     BRIGHTNESS["LOW_CORRECT"] = config["brightness"].getfloat("low_correct")
     BRIGHTNESS["HIGH_BRIGHTNESS"] = config["brightness"].getint("high_brightness")
@@ -129,7 +130,7 @@ def apply_settings_easy(file_path):
     # with open(file_path, "w") as f:
     #     config.write(f)
 
-    update_ini_file(file_path, "brightness", "weights", str(BRIGHTNESS["WEIGHTS"]))
+    update_ini_file(file_path, "brightness", "discrete", str(BRIGHTNESS["DISCRETE"]))
     update_ini_file(file_path, "brightness", "correct", str(BRIGHTNESS["CORRECT"]))
 
 
@@ -252,11 +253,14 @@ def setMonitor(envLx, old_envLx, change):
     # 转换为推荐亮度值
     if foo:
         Brightness = envLx / BRIGHTNESS["WEIGHTS"]
+        Brightness += BRIGHTNESS["CORRECT"]
+        Brightness += (
+            Brightness - (BRIGHTNESS["MAX"] - BRIGHTNESS["MIN"]) / 2
+        ) * BRIGHTNESS["DISCRETE"]
         if Brightness < BRIGHTNESS["LOW_BRIGHTNESS"]:
             Brightness += BRIGHTNESS["LOW_CORRECT"]
         if Brightness > BRIGHTNESS["HIGH_BRIGHTNESS"]:
             Brightness += BRIGHTNESS["HIGH_CORRECT"]
-        Brightness += BRIGHTNESS["CORRECT"]
         Brightness = min(max(Brightness, BRIGHTNESS["MIN"]), BRIGHTNESS["MAX"])
         Brightness = math.ceil(Brightness)
         print("Current: %s" % Brightness)

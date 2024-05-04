@@ -114,8 +114,10 @@ def background_task(q):
         # 亮度值稳定后
         elif foo == -2:
             if bri_now != bri_recom:
-                if bri_stable < 1:
+                if bri_stable < 3 and bri_recom == 100: # 防止吃假高亮度的闪
                     bri_stable += 1
+                elif bri_stable < 3:
+                    bri_stable += 2
                 else:
                     try:
                         public.BrightnessAdjust(bri_recom)
@@ -163,33 +165,34 @@ def rerun_settings(self):
     settings_open = False
 
 
+# 简单设置选项
 def run_settings_easy(self):
     root = Tk()
     root.title("设置")
     root.geometry("+500+300")
     root.iconbitmap(public.processPath("1.ico"))
     # 创建滑块控件
-    brightness_weights = Scale(
+    brightness_discrete = Scale(
         root,
-        label="低亮度不变，高亮度：更亮或更暗",
+        label="亮度变化幅度：更小或更大",
         length=200,
         width=20,
-        from_=1.5,
-        to=4,
+        from_=0,
+        to=2,
         orient="horizontal",
         # tickinterval=1,
-        resolution=0.1,
+        resolution=0.05,
     )
-    brightness_weights.set(public.BRIGHTNESS["WEIGHTS"])
-    brightness_weights.pack()
+    brightness_discrete.set(public.BRIGHTNESS["DISCRETE"])
+    brightness_discrete.pack()
 
     brightness_correct = Scale(
         root,
         label="整体亮度：更暗或更亮",
         length=200,
         width=20,
-        from_=-50,
-        to=50,
+        from_=-25,
+        to=25,
         orient="horizontal",
         resolution=1,
     )
@@ -197,8 +200,8 @@ def run_settings_easy(self):
     brightness_correct.pack()
 
     # 实时应用参数
-    def weights_set(val):
-        public.BRIGHTNESS["WEIGHTS"] = float(val)
+    def discrete_set(val):
+        public.BRIGHTNESS["DISCRETE"] = float(val)
         global settings_easy_updata
         settings_easy_updata = True
 
@@ -207,8 +210,8 @@ def run_settings_easy(self):
         global settings_easy_updata
         settings_easy_updata = True
 
-    brightness_weights.bind(
-        "<ButtonRelease-1>", lambda e: weights_set(brightness_weights.get())
+    brightness_discrete.bind(
+        "<ButtonRelease-1>", lambda e: discrete_set(brightness_discrete.get())
     )
 
     brightness_correct.bind(
@@ -283,7 +286,9 @@ class App(Tk):
                 self.deiconify()
                 print("The settings page has opened!")
                 return
-            self.settings_easy = Thread(target=run_settings_easy, args=(self,), daemon=True)
+            self.settings_easy = Thread(
+                target=run_settings_easy, args=(self,), daemon=True
+            )
             self.settings_easy.start()
             settings_open = True
 
