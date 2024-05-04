@@ -10,10 +10,6 @@ SPLIT = "-----------------------------"
 
 # 解决打包后调用文件问题
 def processPath(path):
-    """
-    :param path: 相对于根目录的路径
-    :return: 拼接好的路径
-    """
     if getattr(
         sys, "frozen", False
     ):  # 判断是否存在属性frozen，以此判断是打包的程序还是源代码。false为默认值，即没有frozen属性时返回false
@@ -110,6 +106,7 @@ def apply_config(config):
     BRIGHTNESS["CHANGE_STEP"] = config["brightness"].getfloat("change_step")
     BRIGHTNESS["WEIGHTS"] = config["brightness"].getfloat("weights")
     BRIGHTNESS["DISCRETE"] = config["brightness"].getfloat("discrete")
+    BRIGHTNESS["THRESHOLD"] = config["brightness"].getfloat("threshold")
     BRIGHTNESS["LOW_BRIGHTNESS"] = config["brightness"].getint("low_brightness")
     BRIGHTNESS["LOW_CORRECT"] = config["brightness"].getfloat("low_correct")
     BRIGHTNESS["HIGH_BRIGHTNESS"] = config["brightness"].getint("high_brightness")
@@ -131,7 +128,7 @@ def apply_settings_easy(file_path):
     #     config.write(f)
 
     update_ini_file(file_path, "brightness", "discrete", str(BRIGHTNESS["DISCRETE"]))
-    update_ini_file(file_path, "brightness", "correct", str(BRIGHTNESS["CORRECT"]))
+    update_ini_file(file_path, "brightness", "threshold", str(BRIGHTNESS["THRESHOLD"]))
 
 
 # 初始化配置文件
@@ -154,7 +151,6 @@ def create_config_file(filename):
 [setting]
 # 如果连接了多个摄像头或虚拟摄像头，修改此项切换调用的摄像头。默认 0
 # 如果需要使用摄像头，需要暂时将程序退出解除摄像头占用，或切换成其他不常用的摄像头。
-# 如果亮度一直没有发生变化且很低，可能选择了虚拟摄像头，改个序号值比如 1 或 2 试试
 # 取 -1 时自动检测可用摄像头
 camera = 0
 
@@ -163,7 +159,7 @@ interval = 0.3
 
 # 每次启动程序是否自动打开控制台。
 # 开启 1，关闭 0
-show = 0
+show = 1
 ;---------------------------------------------------------------------------------------
 [brightness]
 # 定义自动调节的亮度最小和最大值。
@@ -171,16 +167,10 @@ show = 0
 min = 0
 max = 100
 
-# 修改优先级第一
 # 计算权值（推荐1.5-4，该系数越小，环境亮度越高则屏幕更亮）
 # 亮度不够则调低，过亮则调高
 # 该值几乎不会影响最低亮度
 weights = 2.5
-
-# 修改优先级第二
-# 亮度总偏移值
-# 如果需要最终亮度整体增加或减少一个固定值，修改此项
-correct = 0
 
 # 亮度的静态和动态防抖值
 # 如果希望程序对环境亮度变化更敏感，可以适当减少 step
@@ -189,6 +179,15 @@ correct = 0
 # 如果对每次调整的亮度浮动过大不满意，适当减少 change_step
 step = 10
 change_step = 2
+
+# 修改优先级第一
+# 离散值（推荐0-2，该系数越大，亮度越容易偏向更暗或更亮）
+# 如果环境亮度低则屏幕亮度更低，环境亮度高则屏幕亮度更高，取0则不生效
+discrete = 1.0
+
+# 修改优先级第二
+# 判断高亮度与低亮度之间的临界点亮度，取亮度 min 和 max 之间的合适值
+threshold = 50
 
 # 低亮度阈值与修正值
 # 如果需要在某个亮度值以下更亮或更暗，先确保 low_correct 为 0
@@ -203,6 +202,10 @@ low_correct = 0
 # 如果高于这个范围，需要更低亮度可以填 -10，更亮则填 10，可以适当取值
 high_brightness = 75
 high_correct = 0
+
+# 亮度总偏移值
+# 如果需要最终亮度整体增加或减少一个固定值，修改此项
+correct = 0
 ;---------------------------------------------------------------------------------------
 [transitional]
 # 亮度剧烈变化时，启动亮度过渡估算，加快响应速度
@@ -215,6 +218,7 @@ switch = 1
 weights = 2
 """
         )
+    print("成功初始化配置文件")
 
 
 # 程序初始化启动，读取并应用配置
@@ -226,7 +230,7 @@ def initialize(file_path):
         create_config_file(file_path)
         config = read_config(file_path)
     if apply_config(config):
-        print("The parameters are configured")
+        print("成功读取配置文件")
         print(SPLIT)
     else:
         print(f"There was an error in the {file_path} file")
@@ -253,17 +257,17 @@ def setMonitor(envLx, old_envLx, change):
     # 转换为推荐亮度值
     if foo:
         Brightness = envLx / BRIGHTNESS["WEIGHTS"]
-        Brightness += BRIGHTNESS["CORRECT"]
         Brightness += (
-            Brightness - (BRIGHTNESS["MAX"] - BRIGHTNESS["MIN"]) / 2
+            Brightness - BRIGHTNESS["MAX"] + BRIGHTNESS["THRESHOLD"]
         ) * BRIGHTNESS["DISCRETE"]
         if Brightness < BRIGHTNESS["LOW_BRIGHTNESS"]:
             Brightness += BRIGHTNESS["LOW_CORRECT"]
         if Brightness > BRIGHTNESS["HIGH_BRIGHTNESS"]:
             Brightness += BRIGHTNESS["HIGH_CORRECT"]
+        Brightness += BRIGHTNESS["CORRECT"]
         Brightness = min(max(Brightness, BRIGHTNESS["MIN"]), BRIGHTNESS["MAX"])
         Brightness = math.ceil(Brightness)
-        print("Current: %s" % Brightness)
+        print("推算值: %s" % Brightness)
         return Brightness
     else:
         return -2
@@ -281,6 +285,6 @@ def transitionBrightness(now, recom):
         change += BRIGHTNESS["STEP"] * 2
     now += change
     now = math.ceil(now)
-    print(f"Transition now:{now}")
+    print(f"当前过渡亮度: {now}")
     BrightnessAdjust(now)
     return now

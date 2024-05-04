@@ -24,18 +24,18 @@ def background_task(q):
 
     # 检查可用摄像头
     if not cap.isOpened():
-        print("Error opening video stream or file")
+        print("正在检查可用摄像头")
         foo = 0
         while 1:
             cap = cv2.VideoCapture(foo)
             if cap.isOpened():
-                print(f"Your available cameras is:{foo}")
+                print(f"当前使用摄像头为:{foo}")
                 public.SETTING["CAMERA"] = foo
                 break
             elif foo < 5:
                 foo += 1
             else:
-                print("You don't have a camera ")
+                print("你没有可用摄像头")
                 return
 
     bri_old = -1  # 上一次亮度记录值
@@ -91,11 +91,12 @@ def background_task(q):
         try:
             foo = public.setMonitor(bri, bri_old, bri_recom - bri_now)
         except Exception as e:
-            print(f"Error: {e}")
+            print(f"错误: {e}")
         # 环境亮度估算中
         if foo >= 0:
+            bri_stable = 0
             bri_recom = foo
-            print("Adjusting...")
+            print("调整中...")
             # 设置初始亮度
             if bri_now == -1:
                 bri_now = bri_recom
@@ -108,30 +109,36 @@ def background_task(q):
                     if now_bri_foo != -2:
                         bri_now = now_bri_foo
                 except Exception as e:
-                    print(f"Error: {e}")
-
-            bri_stable = 0
-        # 亮度值稳定后
+                    print(f"错误: {e}")
+        # 推荐亮度值稳定后
         elif foo == -2:
             if bri_now != bri_recom:
-                if bri_stable < 3 and bri_recom == 100: # 防止吃假高亮度的闪
+                if bri_stable < 3:
+                    # 确保过亮或过暗的亮度值是真实的
+                    if (
+                        bri_recom > public.BRIGHTNESS["MAX"] - public.BRIGHTNESS["STEP"]
+                        or bri_recom
+                        < public.BRIGHTNESS["MIN"] + public.BRIGHTNESS["STEP"]
+                    ):
+                        time.sleep(public.SETTING["INTERVAL"])
+
                     bri_stable += 1
-                elif bri_stable < 3:
-                    bri_stable += 2
+                    print("等待亮度稳定中...")
+
                 else:
                     try:
                         public.BrightnessAdjust(bri_recom)
                     except Exception as e:
-                        print(f"Error: {e}")
+                        print(f"错误: {e}")
                     bri_now = bri_recom
-                    print("Stable now: %s" % bri_now)
+                    print("确定亮度值: %s" % bri_now)
                     print(public.SPLIT)
-                    bri_stable = 5
+                    bri_stable = 6
             elif bri_now == bri_recom:
                 if bri_stable < 3:
                     bri_stable += 1
                 if bri_stable == 2:
-                    print("No change: %s" % bri_now)
+                    print("稳定亮度值: %s" % bri_now)
                     print(public.SPLIT)
 
         bri_old = bri
@@ -156,7 +163,7 @@ def rerun_settings(self):
 
     self.thread.join()  # 等待进程结束
     self.text.delete(1.0, "end")  # 清空输入框
-    print("Restarting...")
+    print("重启中...")
     self.thread = Thread(target=background_task, args=(self.queue,), daemon=True)
     self.thread.start()
 
@@ -168,6 +175,7 @@ def rerun_settings(self):
 # 简单设置选项
 def run_settings_easy(self):
     root = Tk()
+    # root.attributes("-toolwindow", 2) # 去掉窗口最大化最小化按钮，只保留关闭
     root.title("设置")
     root.geometry("+500+300")
     root.iconbitmap(public.processPath("1.ico"))
@@ -177,27 +185,30 @@ def run_settings_easy(self):
         label="亮度变化幅度：更小或更大",
         length=200,
         width=20,
-        from_=0,
+        from_=0.1,
         to=2,
         orient="horizontal",
         # tickinterval=1,
-        resolution=0.05,
+        resolution=0.1,
     )
     brightness_discrete.set(public.BRIGHTNESS["DISCRETE"])
     brightness_discrete.pack()
 
-    brightness_correct = Scale(
+    brightness_threshold = Scale(
         root,
-        label="整体亮度：更暗或更亮",
+        label="亮度变化趋向：更暗或更亮",
         length=200,
         width=20,
-        from_=-25,
-        to=25,
+        from_=-30,
+        to=30,
         orient="horizontal",
-        resolution=1,
+        resolution=5,
     )
-    brightness_correct.set(public.BRIGHTNESS["CORRECT"])
-    brightness_correct.pack()
+    brightness_threshold.set(
+        public.BRIGHTNESS["THRESHOLD"]
+        - (public.BRIGHTNESS["MAX"] - public.BRIGHTNESS["MIN"]) / 2
+    )
+    brightness_threshold.pack()
 
     # 实时应用参数
     def discrete_set(val):
@@ -206,7 +217,8 @@ def run_settings_easy(self):
         settings_easy_updata = True
 
     def correct_set(val):
-        public.BRIGHTNESS["CORRECT"] = int(val)
+        val += (public.BRIGHTNESS["MAX"] - public.BRIGHTNESS["MIN"]) / 2
+        public.BRIGHTNESS["THRESHOLD"] = int(val)
         global settings_easy_updata
         settings_easy_updata = True
 
@@ -214,8 +226,8 @@ def run_settings_easy(self):
         "<ButtonRelease-1>", lambda e: discrete_set(brightness_discrete.get())
     )
 
-    brightness_correct.bind(
-        "<ButtonRelease-1>", lambda e: correct_set(brightness_correct.get())
+    brightness_threshold.bind(
+        "<ButtonRelease-1>", lambda e: correct_set(brightness_threshold.get())
     )
 
     root.mainloop()
@@ -223,9 +235,9 @@ def run_settings_easy(self):
     # 关闭窗口后保存参数
     try:
         public.apply_settings_easy("config.ini")
-        print("The settings are saved")
+        print("设置已保存")
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"错误: {e}")
     print(public.SPLIT)
 
     global settings_open
@@ -284,7 +296,7 @@ class App(Tk):
             global settings_open
             if settings_open:
                 self.deiconify()
-                print("The settings page has opened!")
+                print("当前已有设置界面被打开！")
                 return
             self.settings_easy = Thread(
                 target=run_settings_easy, args=(self,), daemon=True
@@ -297,7 +309,7 @@ class App(Tk):
             global settings_open
             if settings_open:
                 self.deiconify()
-                print("The settings page has opened!")
+                print("当前已有设置界面被打开！")
                 return
             self.settings = Thread(target=rerun_settings, args=(self,), daemon=True)
             self.settings.start()
