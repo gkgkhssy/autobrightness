@@ -186,7 +186,7 @@ def run_settings_easy(self):
         length=200,
         width=20,
         from_=0.1,
-        to=2,
+        to=4,
         orient="horizontal",
         # tickinterval=1,
         resolution=0.1,
@@ -194,19 +194,20 @@ def run_settings_easy(self):
     brightness_discrete.set(public.BRIGHTNESS["DISCRETE"])
     brightness_discrete.pack()
 
+    symmetry_range = (public.BRIGHTNESS["MAX"] - public.BRIGHTNESS["MIN"]) / 2
     brightness_threshold = Scale(
         root,
         label="亮度变化趋向：更暗或更亮",
         length=200,
         width=20,
-        from_=-30,
-        to=30,
+        from_=0 - symmetry_range,
+        to=symmetry_range,
         orient="horizontal",
-        resolution=5,
+        resolution=2,
     )
     brightness_threshold.set(
         public.BRIGHTNESS["THRESHOLD"]
-        - (public.BRIGHTNESS["MAX"] - public.BRIGHTNESS["MIN"]) / 2
+        # - (public.BRIGHTNESS["MAX"] - public.BRIGHTNESS["MIN"]) / 2
     )
     brightness_threshold.pack()
 
@@ -217,7 +218,7 @@ def run_settings_easy(self):
         settings_easy_updata = True
 
     def correct_set(val):
-        val += (public.BRIGHTNESS["MAX"] - public.BRIGHTNESS["MIN"]) / 2
+        # val += (public.BRIGHTNESS["MAX"] - public.BRIGHTNESS["MIN"]) / 2
         public.BRIGHTNESS["THRESHOLD"] = int(val)
         global settings_easy_updata
         settings_easy_updata = True

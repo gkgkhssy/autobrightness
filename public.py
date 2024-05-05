@@ -258,7 +258,9 @@ def setMonitor(envLx, old_envLx, change):
     if foo:
         Brightness = envLx / BRIGHTNESS["WEIGHTS"]
         Brightness += (
-            Brightness - BRIGHTNESS["MAX"] + BRIGHTNESS["THRESHOLD"]
+            Brightness
+            - (BRIGHTNESS["MAX"] - BRIGHTNESS["MIN"]) / 2
+            + BRIGHTNESS["THRESHOLD"]
         ) * BRIGHTNESS["DISCRETE"]
         if Brightness < BRIGHTNESS["LOW_BRIGHTNESS"]:
             Brightness += BRIGHTNESS["LOW_CORRECT"]
