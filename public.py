@@ -274,7 +274,7 @@ def setMonitor(envLx, old_envLx, change):
     else:
         return -2
 
-
+ 
 # 亮度剧烈变化时，初步估算并适应亮度
 def transitionBrightness(now, recom):
     if abs(now - recom) < BRIGHTNESS["STEP"] * 2:
