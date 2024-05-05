@@ -170,7 +170,7 @@ max = 100
 # 计算权值（推荐1.5-4，该系数越小，环境亮度越高则屏幕更亮）
 # 亮度不够则调低，过亮则调高
 # 该值几乎不会影响最低亮度
-weights = 2.5
+weights = 2.55
 
 # 亮度的静态和动态防抖值
 # 如果希望程序对环境亮度变化更敏感，可以适当减少 step
@@ -186,8 +186,9 @@ change_step = 2
 discrete = 1.0
 
 # 修改优先级第二
-# 判断高亮度与低亮度之间的临界点亮度，取亮度 min 和 max 之间的合适值
-threshold = 50
+# 判断高亮度与低亮度之间的临界点偏移亮度值，需与discrete配合
+# 如果需要暗一些可以填 -10 ，亮一些则填 10
+threshold = 0
 
 # 低亮度阈值与修正值
 # 如果需要在某个亮度值以下更亮或更暗，先确保 low_correct 为 0
@@ -274,7 +275,7 @@ def setMonitor(envLx, old_envLx, change):
     else:
         return -2
 
- 
+
 # 亮度剧烈变化时，初步估算并适应亮度
 def transitionBrightness(now, recom):
     if abs(now - recom) < BRIGHTNESS["STEP"] * 2:

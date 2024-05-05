@@ -193,7 +193,7 @@ def run_settings_easy(self):
     )
     brightness_discrete.set(public.BRIGHTNESS["DISCRETE"])
     brightness_discrete.pack()
- 
+
     symmetry_range = (public.BRIGHTNESS["MAX"] - public.BRIGHTNESS["MIN"]) / 2
     brightness_threshold = Scale(
         root,
