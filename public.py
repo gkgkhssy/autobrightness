@@ -1,5 +1,5 @@
-import wmi, math, sys, os, subprocess, tempfile, shutil
-
+import wmi, math, sys, os, subprocess, tempfile, shutil, pyautogui
+import numpy as np
 from configparser import ConfigParser
 
 SETTING = {}
@@ -115,6 +115,9 @@ def apply_config(config):
 
     TRANSITIONAL["SWITCH"] = config["transitional"].getint("switch")
     TRANSITIONAL["WEIGHTS"] = config["transitional"].getfloat("weights")
+    TRANSITIONAL["BLACK_WHITE"] = config["transitional"].getint("black_white")
+    TRANSITIONAL["AMPLITUDE"] = config["transitional"].getfloat("amplitude")
+    TRANSITIONAL["CORRECT"] = 0
     return True
 
 
@@ -186,10 +189,9 @@ change_step = 2
 discrete = 1.0
 
 # 修改优先级第二
-# 判断高亮度与低亮度之间的临界点偏移亮度值，需与discrete配合
-# 如果需要暗一些可以填 -10 ，亮一些则填 10
-threshold = 0
-
+# 判断高亮度与低亮度之间的临界点亮度，取亮度 min 和 max 之间的合适值
+threshold = 50.0
+;---------------------------------------------------------------------------------------
 # 低亮度阈值与修正值
 # 如果需要在某个亮度值以下更亮或更暗，先确保 low_correct 为 0
 # 观察控制台稳定后亮度值，一般将该值+5确保范围生效，然后填入 low_brightness
@@ -217,6 +219,13 @@ switch = 1
 # 如果希望环境亮度变化剧烈时，屏幕亮度变化跨幅更大，可以填 1.5
 # 如果希望环境亮度变化剧烈时，屏幕亮度变化跨幅更小，可以填 3
 weights = 2
+;---------------------------------------------------------------------------------------
+# 当屏幕显示内容由主暗色转变为主亮色时，适当降低屏幕亮度
+# 开启 1，关闭 0
+black_white = 0
+
+# 变化幅度（推荐0.5-2，系数越大变化幅度越大）
+amplitude = 1.0
 """
         )
     print("成功初始化配置文件")
@@ -258,16 +267,15 @@ def setMonitor(envLx, old_envLx, change):
     # 转换为推荐亮度值
     if foo:
         Brightness = envLx / BRIGHTNESS["WEIGHTS"]
-        Brightness += (
-            Brightness
-            - (BRIGHTNESS["MAX"] - BRIGHTNESS["MIN"]) / 2
-            + BRIGHTNESS["THRESHOLD"]
-        ) * BRIGHTNESS["DISCRETE"]
-        if Brightness < BRIGHTNESS["LOW_BRIGHTNESS"]:
+        print(f"环境亮度: {math.ceil(Brightness)}")
+        Brightness += (Brightness - BRIGHTNESS["THRESHOLD"]) * BRIGHTNESS["DISCRETE"]
+        Brightness = min(max(Brightness, BRIGHTNESS["MIN"]), BRIGHTNESS["MAX"])
+        if Brightness <= BRIGHTNESS["LOW_BRIGHTNESS"]:
             Brightness += BRIGHTNESS["LOW_CORRECT"]
-        if Brightness > BRIGHTNESS["HIGH_BRIGHTNESS"]:
+        if Brightness >= BRIGHTNESS["HIGH_BRIGHTNESS"]:
             Brightness += BRIGHTNESS["HIGH_CORRECT"]
         Brightness += BRIGHTNESS["CORRECT"]
+        Brightness += TRANSITIONAL["CORRECT"]
         Brightness = min(max(Brightness, BRIGHTNESS["MIN"]), BRIGHTNESS["MAX"])
         Brightness = math.ceil(Brightness)
         print("推算值: %s" % Brightness)
@@ -291,3 +299,38 @@ def transitionBrightness(now, recom):
     print(f"当前过渡亮度: {now}")
     BrightnessAdjust(now)
     return now
+
+
+# 获取屏幕显示内容的灰度值
+def getAverageGrayscale(
+    region=(
+        int(pyautogui.size().width / 4),
+        int(pyautogui.size().height / 4),
+        int(pyautogui.size().width / 2),
+        int(pyautogui.size().height / 2),
+    )
+):
+    # 捕获屏幕图像或指定区域的图像
+    screenshot = pyautogui.screenshot(region=region)
+
+    # 将图像转换为灰度图像
+    gray_image = screenshot.convert("L")
+
+    # 使用numpy数组来处理图像数据
+    gray_array = np.array(gray_image)
+
+    # 计算所有像素值的平均值
+    average_gray = np.mean(gray_array)
+
+    return average_gray
+
+
+# 根据屏幕灰度值计算应适当减少的亮度
+def dimScreenByGrayscale(greyness):
+    if greyness < 155:
+        return 2
+
+    greyness /= 25.5
+    greyness *= TRANSITIONAL["AMPLITUDE"]
+    greyness = 0 - math.floor(greyness)
+    return greyness

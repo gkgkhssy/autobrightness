@@ -41,7 +41,10 @@ def background_task(q):
     bri_old = -1  # 上一次亮度记录值
     bri_now = -1  # 现在的屏幕亮度
     bri_recom = -100  # 推荐的屏幕亮度
-    bri_stable = 0  # 稳定计数器
+    bri_stable = 0
+
+    trans_offset_old = 0  # 上一次的屏幕偏移亮度
+    trans_offset_stable = False  # 是否可以切换为黑屏幕状态
 
     # 逐帧捕获
     while True:
@@ -116,9 +119,10 @@ def background_task(q):
                 if bri_stable < 3:
                     # 确保过亮或过暗的亮度值是真实的
                     if (
-                        bri_recom > public.BRIGHTNESS["MAX"] - public.BRIGHTNESS["STEP"]
-                        or bri_recom
-                        < public.BRIGHTNESS["MIN"] + public.BRIGHTNESS["STEP"]
+                        bri_recom
+                        > public.BRIGHTNESS["MAX"] - public.BRIGHTNESS["STEP"]
+                        # or bri_recom
+                        # < public.BRIGHTNESS["MIN"] + public.BRIGHTNESS["STEP"]
                     ):
                         time.sleep(public.SETTING["INTERVAL"])
 
@@ -142,6 +146,25 @@ def background_task(q):
                     print(public.SPLIT)
 
         bri_old = bri
+
+        # 屏幕显示大面积浅色时自适应亮度
+        if public.TRANSITIONAL["BLACK_WHITE"] == 1:
+            # 获取屏幕显示内容的灰度值
+            average_gray = public.getAverageGrayscale()
+            # 根据屏幕灰度值适当减少亮度
+            trans_offset = public.dimScreenByGrayscale(average_gray)
+            if trans_offset != 2 and trans_offset != trans_offset_old:
+                public.TRANSITIONAL["CORRECT"] = trans_offset
+                foo = bri_now + trans_offset
+                public.BrightnessAdjust(foo)
+                print(f"白平衡亮度: {foo}")
+                trans_offset_old = trans_offset
+                trans_offset_stable = True
+            elif trans_offset == 2 and trans_offset_stable:
+                public.BrightnessAdjust(bri_now)
+                print(f"黑平衡亮度: {bri_now}")
+                public.TRANSITIONAL["CORRECT"] = trans_offset_old = 0
+                trans_offset_stable = False
 
         # 按 'q' 键退出
         # if cv2.waitKey(1) == ord("q"):
@@ -182,11 +205,11 @@ def run_settings_easy(self):
     # 创建滑块控件
     brightness_discrete = Scale(
         root,
-        label="亮度变化幅度：更小或更大",
-        length=200,
+        label="亮度变化幅度（更小或更大）",
+        length=300,
         width=20,
         from_=0.1,
-        to=4,
+        to=10,
         orient="horizontal",
         # tickinterval=1,
         resolution=0.1,
@@ -194,21 +217,17 @@ def run_settings_easy(self):
     brightness_discrete.set(public.BRIGHTNESS["DISCRETE"])
     brightness_discrete.pack()
 
-    symmetry_range = (public.BRIGHTNESS["MAX"] - public.BRIGHTNESS["MIN"]) / 2
     brightness_threshold = Scale(
         root,
-        label="亮度变化趋向：更暗或更亮",
-        length=200,
+        label="更暗或更亮的分界点（亮度值）",
+        length=300,
         width=20,
-        from_=0 - symmetry_range,
-        to=symmetry_range,
+        from_=public.BRIGHTNESS["MIN"],
+        to=public.BRIGHTNESS["MAX"],
         orient="horizontal",
-        resolution=2,
+        resolution=1,
     )
-    brightness_threshold.set(
-        public.BRIGHTNESS["THRESHOLD"]
-        # - (public.BRIGHTNESS["MAX"] - public.BRIGHTNESS["MIN"]) / 2
-    )
+    brightness_threshold.set(public.BRIGHTNESS["THRESHOLD"])
     brightness_threshold.pack()
 
     # 实时应用参数
