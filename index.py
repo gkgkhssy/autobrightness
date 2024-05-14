@@ -2,7 +2,7 @@ import pystray, cv2, time
 
 from threading import Thread
 from queue import Empty, Queue
-from tkinter import Text, Tk, ttk
+from tkinter import Text, Tk
 from pystray import MenuItem, Menu
 from PIL import Image
 from tkinter import Scale
@@ -12,13 +12,13 @@ import public
 settings_open = False  # 判断设置页面是否已打开
 settings_updata = False  # 判断设置是否更新
 settings_easy_updata = False  # 判断亮度设置是否更新
+blackWhite_run = False  # 判断根据屏幕灰白动态亮度是否已打开
+
+bri_now = -1  # 现在的屏幕亮度
 
 
 # 挂载任务
 def background_task(q):
-    # 初始化
-    public.initialize("config.ini")
-
     # 创建VideoCapture对象，参数0表示使用默认的摄像头
     cap = cv2.VideoCapture(public.SETTING["CAMERA"])
 
@@ -39,20 +39,15 @@ def background_task(q):
                 return
 
     bri_old = -1  # 上一次亮度记录值
-    bri_now = -1  # 现在的屏幕亮度
+    global bri_now  # 现在的屏幕亮度
     bri_recom = -100  # 推荐的屏幕亮度
     bri_stable = 0
-
-    trans_offset_old = 0  # 上一次的屏幕偏移亮度
-    trans_offset_stable = False  # 是否可以切换为黑屏幕状态
 
     # 逐帧捕获
     while True:
         # 设置更新退出循环
         if settings_updata:
-            cap.release()
-            cv2.destroyAllWindows()
-            return
+            break
         global settings_easy_updata
         if settings_easy_updata:
             # 初始化参数，应用更新配置
@@ -147,25 +142,6 @@ def background_task(q):
 
         bri_old = bri
 
-        # 屏幕显示大面积浅色时自适应亮度
-        if public.TRANSITIONAL["BLACK_WHITE"] == 1:
-            # 获取屏幕显示内容的灰度值
-            average_gray = public.getAverageGrayscale()
-            # 根据屏幕灰度值适当减少亮度
-            trans_offset = public.dimScreenByGrayscale(average_gray)
-            if trans_offset != 2 and trans_offset != trans_offset_old:
-                public.TRANSITIONAL["CORRECT"] = trans_offset
-                foo = bri_now + trans_offset
-                public.BrightnessAdjust(foo)
-                print(f"白平衡亮度: {foo}")
-                trans_offset_old = trans_offset
-                trans_offset_stable = True
-            elif trans_offset == 2 and trans_offset_stable:
-                public.BrightnessAdjust(bri_now)
-                print(f"黑平衡亮度: {bri_now}")
-                public.TRANSITIONAL["CORRECT"] = trans_offset_old = 0
-                trans_offset_stable = False
-
         # 按 'q' 键退出
         # if cv2.waitKey(1) == ord("q"):
         #     break
@@ -177,6 +153,37 @@ def background_task(q):
     cv2.destroyAllWindows()
 
 
+# 通过屏幕显示内容动态改变亮度任务
+def dimScreenByGrayscale_task(q):
+    trans_offset_old = 0  # 上一次的屏幕偏移亮度
+    trans_offset_stable = False  # 是否可以切换为黑屏幕状态
+    global bri_now  # 现在的屏幕亮度
+
+    while True:
+        """屏幕显示大面积浅色时自适应亮度"""
+        if settings_updata:
+            return
+        # 获取屏幕显示内容的灰度值
+        average_gray = public.getAverageGrayscale()
+        # 根据屏幕灰度值适当减少亮度
+        trans_offset = public.dimScreenByGrayscale(average_gray)
+        if trans_offset != 2 and trans_offset != trans_offset_old:
+            public.TRANSITIONAL["CORRECT"] = trans_offset
+            foo = bri_now + trans_offset
+            public.BrightnessAdjust(foo)
+            print(f"白平衡亮度: {foo}")
+            trans_offset_old = trans_offset
+            trans_offset_stable = True
+        elif trans_offset == 2 and trans_offset_stable:
+            public.BrightnessAdjust(bri_now)
+            print(f"黑平衡亮度: {bri_now}")
+            public.TRANSITIONAL["CORRECT"] = trans_offset_old = 0
+            trans_offset_stable = False
+
+        # 因为及时性要求高，所以取固定检测频率
+        time.sleep(0.1)
+
+
 # 重新启动任务
 def rerun_settings(self):
     public.open_ini("config.ini")
@@ -184,13 +191,28 @@ def rerun_settings(self):
     global settings_updata
     settings_updata = True
 
-    self.thread.join()  # 等待进程结束
+    # 等待进程结束
+    self.thread.join()
+    global blackWhite_run
+    if blackWhite_run:
+        self.thread2.join()
     self.text.delete(1.0, "end")  # 清空输入框
+    settings_updata = False
+
     print("重启中...")
+    public.initialize("config.ini")  # 初始化
+    # 重启线程
     self.thread = Thread(target=background_task, args=(self.queue,), daemon=True)
     self.thread.start()
+    if public.TRANSITIONAL["BLACK_WHITE"] == 1:
+        self.thread2 = Thread(
+            target=dimScreenByGrayscale_task, args=(self.queue,), daemon=True
+        )
+        self.thread2.start()
+        blackWhite_run = True
+    else:
+        blackWhite_run = False
 
-    settings_updata = False
     global settings_open
     settings_open = False
 
@@ -269,12 +291,9 @@ class App(Tk):
     # GUI初始化代码...
     def __init__(self):
         super().__init__()
-        # 初始化
-        public.initialize("config.ini")
 
         # 设置窗口
-        if public.SETTING["SHOW"] == 0:
-            self.withdraw()  # 隐藏主窗口
+        self.withdraw()  # 隐藏主窗口
         self.title("自动亮度")
         self.geometry("500x300")
         self.iconbitmap(public.processPath("1.ico"))
@@ -288,6 +307,13 @@ class App(Tk):
         # 重定向标准输出到文本框
         public.redirect_stdout_to_tkinter(self.text)
 
+        # 初始化
+        public.initialize("config.ini")
+
+        # 显示控制台
+        if public.SETTING["SHOW"] == 1:
+            self.deiconify()
+
         # 托盘图标创建代码...
         self.create_tray_icon()
 
@@ -298,6 +324,14 @@ class App(Tk):
         self.thread = Thread(target=background_task, args=(self.queue,))
         self.thread.daemon = True  # 设置为守护线程，确保在主线程退出时它也会退出
         self.thread.start()
+        # 通过屏幕显示内容动态改变亮度任务
+        if public.TRANSITIONAL["BLACK_WHITE"] == 1:
+            self.thread2 = Thread(
+                target=dimScreenByGrayscale_task, args=(self.queue,), daemon=True
+            )
+            self.thread2.start()
+            global blackWhite_run
+            blackWhite_run = True
 
     # 托盘图标创建代码...
     def create_tray_icon(self):
