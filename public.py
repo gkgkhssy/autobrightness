@@ -1,4 +1,4 @@
-import wmi, math, sys, os, subprocess, tempfile, shutil, pyautogui
+import wmi, math, sys, os, subprocess, tempfile, shutil, pyautogui, time
 import numpy as np
 from configparser import ConfigParser
 
@@ -30,6 +30,20 @@ def redirect_stdout_to_tkinter(text_widget):
             self.text_widget.see("end")
 
     sys.stdout = StdoutRedirector(text_widget)
+
+
+def log(message):
+    """统一日志函数：带时间戳并追加到文件。"""
+    try:
+        ts = time.strftime("%Y-%m-%d %H:%M:%S")
+        line = f"[{ts}] {message}"
+        print(line)
+        # 同目录写入日志文件，避免过度增长仅追加
+        with open(processPath("autobrightness.log"), "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        # 日志失败不应阻塞主流程
+        pass
 
 
 # 保留注释，修改单行键值，
@@ -170,7 +184,7 @@ show = 1
 min = 0
 max = 100
 
-# 计算权值（推荐1.5-4，该系数越小，环境亮度越高则屏幕更亮）
+# 计算环境亮度与屏幕亮度的权重值（推荐1.5-4，该系数越小，环境亮度越高则屏幕更亮）
 # 亮度不够则调低，过亮则调高
 # 该值几乎不会影响最低亮度
 weights = 2.55
@@ -189,7 +203,7 @@ change_step = 2
 discrete = 1.0
 
 # 修改优先级第二
-# 判断高亮度与低亮度之间的临界点亮度，取亮度 min 和 max 之间的合适值
+# 判断环境高亮度或低亮度之间的临界点亮度值，根据环境亮度取 0 至 100 之间的合适值
 threshold = 50.0
 ;---------------------------------------------------------------------------------------
 # 低亮度阈值与修正值
@@ -248,13 +262,25 @@ def initialize(file_path):
 
 # 修改亮度
 def BrightnessAdjust(brightness_level):
-    c = wmi.WMI(namespace="root\\WMI")
-    methods = c.WmiMonitorBrightnessMethods()
-    if methods:
-        a = methods[0]
-        a.WmiSetBrightness(brightness_level, Timeout=500)
-    else:
-        print("No brightness methods found.")
+    try:
+        # 确保亮度为整数并在配置范围内
+        try:
+            bri = int(round(float(brightness_level)))
+        except Exception:
+            bri = 0
+        bri = min(max(bri, BRIGHTNESS.get("MIN", 0)), BRIGHTNESS.get("MAX", 100))
+
+        c = wmi.WMI(namespace="root\\WMI")
+        methods = c.WmiMonitorBrightnessMethods()
+        if methods:
+            a = methods[0]
+            # 使用位置参数以避免命名参数导致类型不匹配
+            a.WmiSetBrightness(bri, 500)
+            print(f"设置亮度: {bri}")
+        else:
+            log("No brightness methods found.")
+    except Exception as e:
+        log(f"WMI 调整亮度失败: {e}")
 
 
 # 计算精确亮度值
@@ -269,13 +295,13 @@ def setMonitor(envLx, old_envLx, change):
         Brightness = envLx / BRIGHTNESS["WEIGHTS"]
         print(f"环境亮度: {math.ceil(Brightness)}")
         Brightness += (Brightness - BRIGHTNESS["THRESHOLD"]) * BRIGHTNESS["DISCRETE"]
-        Brightness = min(max(Brightness, BRIGHTNESS["MIN"]), BRIGHTNESS["MAX"])
+        # Brightness = min(max(Brightness, BRIGHTNESS["MIN"]), BRIGHTNESS["MAX"])
         if Brightness <= BRIGHTNESS["LOW_BRIGHTNESS"]:
             Brightness += BRIGHTNESS["LOW_CORRECT"]
         if Brightness >= BRIGHTNESS["HIGH_BRIGHTNESS"]:
             Brightness += BRIGHTNESS["HIGH_CORRECT"]
         Brightness += BRIGHTNESS["CORRECT"]
-        Brightness += TRANSITIONAL["CORRECT"]
+        # Brightness += TRANSITIONAL["CORRECT"]
         Brightness = min(max(Brightness, BRIGHTNESS["MIN"]), BRIGHTNESS["MAX"])
         Brightness = math.ceil(Brightness)
         print("推算值: %s" % Brightness)

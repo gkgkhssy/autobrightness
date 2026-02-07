@@ -1,13 +1,16 @@
-import pystray, cv2, time
+import pystray, cv2, time, ctypes
 
 from threading import Thread
 from queue import Empty, Queue
-from tkinter import Text, Tk
+from tkinter import Text, Tk, Scale
 from pystray import MenuItem, Menu
 from PIL import Image
-from tkinter import Scale
 
 import public
+
+ERROR_ALREADY_EXISTS = 183
+_mutex_name = "Global\\MyAutoBrightnessApp_Mutex"  # 唯一应用名
+is_first_instance = False
 
 settings_open = False  # 判断设置页面是否已打开
 settings_updata = False  # 判断设置是否更新
@@ -37,6 +40,8 @@ def background_task(q):
             else:
                 print("你没有可用摄像头")
                 return
+    else:
+        print(f"当前使用摄像头为:{public.SETTING['CAMERA']}")
 
     bri_old = -1  # 上一次亮度记录值
     global bri_now  # 现在的屏幕亮度
@@ -57,23 +62,82 @@ def background_task(q):
             bri_stable = 0
             settings_easy_updata = False
 
-        ret, frame = cap.read()
+        # 使用带超时的读取，避免在摄像头无响应（如合盖后）时阻塞
+        def _read_with_timeout(cam, timeout=2):
+            qret = Queue(maxsize=1)
+
+            def _read():
+                try:
+                    r, f = cam.read()
+                    qret.put((r, f))
+                except Exception:
+                    try:
+                        qret.put((False, None))
+                    except Exception:
+                        pass
+
+            th = Thread(target=_read, daemon=True)
+            th.start()
+            try:
+                return qret.get(timeout=timeout)
+            except Empty:
+                return False, None
+
+        ret, frame = _read_with_timeout(cap, timeout=2)
+        # 如果读取失败，尝试重连。记录连续失败次数，超过阈值时重建摄像头
         if not ret:
-            foo = 0
-            # 睡眠唤醒超时计时
-            while foo < 30:
+            if not hasattr(background_task, "_fail_count"):
+                background_task._fail_count = 0
+            background_task._fail_count += 1
+            # public.log(f"摄像头读取失败 (count={background_task._fail_count})")
+            # 小范围短暂等待后重试
+            if background_task._fail_count < 3:
                 time.sleep(1)
-                foo += 1
-                cap.release()
-                cap = cv2.VideoCapture(public.SETTING["CAMERA"])
-                ret, frame = cap.read()
-                if ret:
-                    break
-            if foo == 30:
-                print("Unable to receive frame (stream end?). Exiting ...")
-                break
-            else:
                 continue
+
+            # 到达重连阈值，尝试重建摄像头
+            public.log("读取失败，尝试释放并重建摄像头")
+            try:
+                cap.release()
+            except Exception as e:
+                public.log(f"释放摄像头时出错: {e}")
+
+            found = False
+            # 先尝试当前索引，若失败遍历0-5并尝试不同后端
+            backends = [cv2.CAP_DSHOW, cv2.CAP_MSMF, cv2.CAP_ANY]
+            for backend in backends:
+                for idx in range(0, 6):
+                    # public.log(f"尝试打开摄像头 idx={idx} backend={backend}")
+                    try:
+                        cap = cv2.VideoCapture(idx, backend)
+                        if cap.isOpened():
+                            public.SETTING["CAMERA"] = idx
+                            public.log(
+                                f"重建成功，使用摄像头 {idx} (backend={backend})"
+                            )
+                            found = True
+                            break
+                        else:
+                            try:
+                                cap.release()
+                            except Exception:
+                                pass
+                    except Exception as e:
+                        public.log(f"尝试打开摄像头时抛出异常: {e}")
+                if found:
+                    break
+
+            if not found:
+                num = 10
+                public.log(f"未找到可用摄像头，等待{num}秒后重试")
+                background_task._fail_count = 0
+                time.sleep(num)
+                continue
+
+            # 重建成功，清零失败计数并继续
+            background_task._fail_count = 0
+            # 继续下一轮读取
+            continue
 
         # 转为灰度
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -154,7 +218,7 @@ def background_task(q):
 
 
 # 通过屏幕显示内容动态改变亮度任务
-def dimScreenByGrayscale_task(q):
+def dim_screen_by_grayscale_task(q):
     trans_offset_old = 0  # 上一次的屏幕偏移亮度
     trans_offset_stable = False  # 是否可以切换为黑屏幕状态
     global bri_now  # 现在的屏幕亮度
@@ -192,7 +256,7 @@ def rerun_settings(self):
     settings_updata = True
 
     # 等待进程结束
-    self.thread.join()
+    self.thread1.join()
     global blackWhite_run
     if blackWhite_run:
         self.thread2.join()
@@ -202,11 +266,11 @@ def rerun_settings(self):
     print("重启中...")
     public.initialize("config.ini")  # 初始化
     # 重启线程
-    self.thread = Thread(target=background_task, args=(self.queue,), daemon=True)
-    self.thread.start()
+    self.thread1 = Thread(target=background_task, args=(self.queue,), daemon=True)
+    self.thread1.start()
     if public.TRANSITIONAL["BLACK_WHITE"] == 1:
         self.thread2 = Thread(
-            target=dimScreenByGrayscale_task, args=(self.queue,), daemon=True
+            target=dim_screen_by_grayscale_task, args=(self.queue,), daemon=True
         )
         self.thread2.start()
         blackWhite_run = True
@@ -241,11 +305,13 @@ def run_settings_easy(self):
 
     brightness_threshold = Scale(
         root,
-        label="更暗或更亮的分界点（亮度值）",
+        label="更亮或更暗的分界点（环境亮度值）",
         length=300,
         width=20,
-        from_=public.BRIGHTNESS["MIN"],
-        to=public.BRIGHTNESS["MAX"],
+        # from_=public.BRIGHTNESS["MIN"],
+        # to=public.BRIGHTNESS["MAX"],
+        from_=0,
+        to=100,
         orient="horizontal",
         resolution=1,
     )
@@ -286,6 +352,63 @@ def run_settings_easy(self):
     settings_open = False
 
 
+# 创建主窗口
+def create_window(self):
+    self.withdraw()  # 隐藏主窗口
+    self.title("自动亮度")
+    self.geometry("500x300")
+    self.iconbitmap(public.processPath("1.ico"))
+    self.text = Text(self, width=250, height=80)  # 添加一个Text用于显示文本
+    self.text.pack(pady=20)  # 垂直填充一些空间
+    # 禁用键盘输入，只允许 Ctrl+c 复制
+    self.text.bind(
+        "<Key>", lambda e: (0 if e.state == 4 and e.keycode == 67 else "break")
+    )
+
+
+# 检查单实例
+def check_instance():
+    _handle = ctypes.windll.kernel32.CreateMutexW(
+        None, ctypes.wintypes.BOOL(True), _mutex_name
+    )
+    if ctypes.windll.kernel32.GetLastError() != ERROR_ALREADY_EXISTS:
+        global is_first_instance
+        is_first_instance = True
+
+
+# 非单实例警告
+def non_singleton_warning_task(self):
+    self.deiconify()
+    print("程序已在运行，不要重复启动，即将退出...")
+    time.sleep(2)
+    self.destroy()
+    # sys.exit(0)
+
+
+# 创建后台线程
+def create_background_thread(self):
+    # 创建非单实例警告线程
+    if not is_first_instance:
+        self.thread0 = Thread(
+            target=non_singleton_warning_task, args=(self,), daemon=True
+        )
+        self.thread0.start()
+        return
+
+    # 创建后台任务线程
+    self.thread1 = Thread(target=background_task, args=(self.queue,))
+    self.thread1.daemon = True  # 设置为守护线程，确保在主线程退出时它也会退出
+    self.thread1.start()
+    # 通过屏幕显示内容动态改变亮度任务
+    if public.TRANSITIONAL["BLACK_WHITE"] == 1:
+        self.thread2 = Thread(
+            target=dim_screen_by_grayscale_task, args=(self.queue,), daemon=True
+        )
+        self.thread2.start()
+        global blackWhite_run
+        blackWhite_run = True
+
+
 # 定义Tkinter主窗口类
 class App(Tk):
     # GUI初始化代码...
@@ -293,21 +416,15 @@ class App(Tk):
         super().__init__()
 
         # 设置窗口
-        self.withdraw()  # 隐藏主窗口
-        self.title("自动亮度")
-        self.geometry("500x300")
-        self.iconbitmap(public.processPath("1.ico"))
-        self.text = Text(self, width=250, height=80)  # 添加一个Text用于显示文本
-        self.text.pack(pady=20)  # 垂直填充一些空间
-        # 禁用键盘输入，只允许 Ctrl+c 复制
-        self.text.bind(
-            "<Key>", lambda e: (0 if e.state == 4 and e.keycode == 67 else "break")
-        )
+        create_window(self)
 
         # 重定向标准输出到文本框
         public.redirect_stdout_to_tkinter(self.text)
 
-        # 初始化
+        # 检查是否为第一个实例
+        check_instance()
+
+        # 初始化配置
         public.initialize("config.ini")
 
         # 显示控制台
@@ -321,29 +438,19 @@ class App(Tk):
         self.queue = Queue()
 
         # 创建后台线程
-        self.thread = Thread(target=background_task, args=(self.queue,))
-        self.thread.daemon = True  # 设置为守护线程，确保在主线程退出时它也会退出
-        self.thread.start()
-        # 通过屏幕显示内容动态改变亮度任务
-        if public.TRANSITIONAL["BLACK_WHITE"] == 1:
-            self.thread2 = Thread(
-                target=dimScreenByGrayscale_task, args=(self.queue,), daemon=True
-            )
-            self.thread2.start()
-            global blackWhite_run
-            blackWhite_run = True
+        create_background_thread(self)
 
     # 托盘图标创建代码...
     def create_tray_icon(self):
-        def quit_window(icon: pystray.Icon):
-            icon.stop()
-            self.destroy()
+        def quit_window():
+            self.withdraw()
 
         def show_window():
             self.deiconify()
 
-        def on_exit():
-            self.withdraw()
+        def on_exit(icon):
+            icon.stop()
+            self.destroy()
 
         # 简单设置
         def settings_easy():
@@ -375,13 +482,13 @@ class App(Tk):
             MenuItem("设置", settings_easy),
             MenuItem("更多", settings),
             Menu.SEPARATOR,
-            MenuItem("退出", quit_window),
+            MenuItem("退出", on_exit),
         )
         image = Image.open(public.processPath("1.ico"))
         icon = pystray.Icon("icon", image, "自动亮度", menu)
 
         # 重新定义点击关闭按钮的处理
-        self.protocol("WM_DELETE_WINDOW", on_exit)
+        self.protocol("WM_DELETE_WINDOW", quit_window)
 
         Thread(target=icon.run, daemon=True).start()
 
