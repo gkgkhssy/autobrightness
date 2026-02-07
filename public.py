@@ -295,7 +295,7 @@ def setMonitor(envLx, old_envLx, change):
         Brightness = envLx / BRIGHTNESS["WEIGHTS"]
         print(f"环境亮度: {math.ceil(Brightness)}")
         Brightness += (Brightness - BRIGHTNESS["THRESHOLD"]) * BRIGHTNESS["DISCRETE"]
-        # Brightness = min(max(Brightness, BRIGHTNESS["MIN"]), BRIGHTNESS["MAX"])
+        Brightness = min(max(Brightness, BRIGHTNESS["MIN"]), BRIGHTNESS["MAX"])
         if Brightness <= BRIGHTNESS["LOW_BRIGHTNESS"]:
             Brightness += BRIGHTNESS["LOW_CORRECT"]
         if Brightness >= BRIGHTNESS["HIGH_BRIGHTNESS"]:
